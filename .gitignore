@@ -1,0 +1,41 @@
+# Secrets - jangan pernah commit ke Git
+.env
+.env.deploy
+
+# Backup dan log
+backup/*/
+logs/*.csv
+logs/*.json
+logs/results/
+logs/loadtest_*/
+
+# Database dumps
+*.sql
+*.sql.gz
+
+# Log files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Node / npm (jika ada tooling)
+node_modules/
+npm-debug.log
+
+# PHP vendor
+vendor/
+
+# Temporary files
+*.bak
+*.tmp
+*.temp
+

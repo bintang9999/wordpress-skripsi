@@ -1,0 +1,149 @@
+# ==============================================================================
+# Portal Kampus - Docker Compose Stack
+# Target: Xiaomi Redmi Note 4 (aarch64), postmarketOS, Docker 29.5.2
+# Port host 8083 -> WordPress
+# Semua image mendukung linux/arm64
+# ==============================================================================
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # DATABASE: MariaDB 11.4
+  # Port 3306 TIDAK dibuka ke host (keamanan)
+  # ----------------------------------------------------------------------------
+  wordpress_db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: "1.0"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./config/mysql/my.cnf:/etc/mysql/conf.d/portal.cnf:ro
+    networks:
+      - portal_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------------------------------------------
+  # WORDPRESS: 6.7 + PHP 8.3 + Apache
+  # Dikunci ke versi spesifik, bukan latest
+  # Port 8083 di host -> port 80 di container
+  # ----------------------------------------------------------------------------
+  wordpress:
+    image: wordpress:6.7-php8.3-apache
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: "2.0"
+    depends_on:
+      wordpress_db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: wordpress_db:3306
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WORDPRESS_TABLE_PREFIX: wp_
+      WORDPRESS_CONFIG_EXTRA: |
+        define('DISALLOW_FILE_EDIT', true);
+        define('WP_REDIS_HOST', 'redis');
+        define('WP_REDIS_PORT', 6379);
+        define('WP_CACHE', true);
+        define('WP_HOME', '${WP_HOME}');
+        define('WP_SITEURL', '${WP_SITEURL}');
+    ports:
+      - "8083:80"
+    volumes:
+      - wp_data:/var/www/html
+      - ./config/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+    networks:
+      - portal_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/wp-login.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ----------------------------------------------------------------------------
+  # REDIS: Object Cache (aktifkan dengan: docker compose --profile redis up -d)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.5"
+    profiles:
+      - redis
+    command: >
+      redis-server
+      --maxmemory 100mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    networks:
+      - portal_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------------------------
+  # WP-CLI: Jalankan dengan: docker compose --profile tools run --rm wpcli <cmd>
+  # Contoh: docker compose --profile tools run --rm wpcli wp plugin list
+  # ----------------------------------------------------------------------------
+  wpcli:
+    image: wordpress:cli-php8.3
+    profiles:
+      - tools
+    user: "33:33"
+    depends_on:
+      - wordpress_db
+      - wordpress
+    environment:
+      WORDPRESS_DB_HOST: wordpress_db:3306
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WP_HOME: ${WP_HOME}
+      WP_SITEURL: ${WP_SITEURL}
+      WP_ADMIN_USER: ${WP_ADMIN_USER}
+      WP_ADMIN_PASSWORD: ${WP_ADMIN_PASSWORD}
+      WP_ADMIN_EMAIL: ${WP_ADMIN_EMAIL}
+      WP_TITLE: ${WP_TITLE}
+      WP_LOCALE: ${WP_LOCALE:-id_ID}
+      POSTS: ${POSTS:-500}
+      PAGES: ${PAGES:-20}
+    volumes:
+      - wp_data:/var/www/html
+      - ./scripts:/scripts
+    working_dir: /var/www/html
+    entrypoint: ["tail", "-f", "/dev/null"]
+    networks:
+      - portal_net
+
+# ------------------------------------------------------------------------------
+# VOLUMES: Data persisten
+# ------------------------------------------------------------------------------
+volumes:
+  db_data:
+    driver: local
+  wp_data:
+    driver: local
+
+# ------------------------------------------------------------------------------
+# NETWORKS: Jaringan internal antar container
+# ------------------------------------------------------------------------------
+networks:
+  portal_net:
+    driver: bridge
+
